@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-server-toolkit"
+version = "0.1.0"
+description = "Production template for MCP servers: OAuth resource-server auth, per-tool scopes, tenancy, rate limits, timeouts, audit logs, metrics and contract tests."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "Darshan Kumar Satpathy" }]
+dependencies = [
+  "mcp>=2.3,<3",
+  "pyjwt[crypto]>=2.10",
+  "pydantic>=2.9",
+  "pydantic-settings>=2.6",
+  "prometheus-client>=0.21",
+  "uvicorn>=0.32",
+  "anyio>=4.6",
+]
+
+[project.optional-dependencies]
+redis = ["redis>=5.2"]
+dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.8", "mypy>=1.13", "redis>=5.2", "httpx>=0.28"]
+
+[project.scripts]
+mcpkit = "mcpkit.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 140
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "ASYNC"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests call the live server with plain blocking clients on purpose.
+"tests/*" = ["ASYNC210", "ASYNC251"]
+
+[tool.ruff.lint.pycodestyle]
+max-line-length = 180
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]
+
+[[tool.mypy.overrides]]
+# Starlette's custom_route decorator is untyped in the SDK.
+module = ["mcpkit.server"]
+disallow_untyped_decorators = false
+
+[[tool.mypy.overrides]]
+module = ["redis.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+markers = ["redis: needs a redis-server binary or REDIS_URL"]
+
+[tool.coverage.run]
+source = ["mcpkit"]
