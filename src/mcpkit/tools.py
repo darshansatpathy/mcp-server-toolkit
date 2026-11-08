@@ -8,6 +8,7 @@ whether it is read-only, destructive or idempotent.
 from __future__ import annotations
 
 import datetime as dt
+import inspect
 from collections.abc import Callable
 from typing import Annotated, Any, Literal, TypeVar
 
@@ -87,7 +88,13 @@ def register(server: MCPServer[Any], store: Store, registry: Registry) -> None:
     def tool(name: str, scopes: set[str], *, write: bool = False, **annotations: Any) -> Callable[[F], F]:
         registry.tools[name] = ToolPolicy(frozenset(scopes), write)
         hints = ToolAnnotations(read_only_hint=not write, open_world_hint=False, **annotations)
-        return server.tool(name=name, annotations=hints)
+        tool_decorator = server.tool
+
+        def register_tool(fn: F) -> F:
+            # Python 3.13 strips docstring indentation and earlier versions do not; clean it so every version serves the same contract.
+            return tool_decorator(name=name, description=inspect.cleandoc(fn.__doc__ or ""), annotations=hints)(fn)
+
+        return register_tool
 
     async def _get(ticket_id: str) -> dict[str, Any]:
         try:
