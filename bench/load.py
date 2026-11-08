@@ -1,6 +1,6 @@
 """Load test over Streamable HTTP with real tokens: throughput, latency, and that limits hold under load.
 
-    python bench/load.py --clients 32 --calls 100 --out docs/performance.md
+python bench/load.py --clients 32 --calls 100 --out docs/performance.md
 """
 
 from __future__ import annotations
@@ -44,7 +44,10 @@ def start(settings: Settings) -> tuple[uvicorn.Server, threading.Thread, int]:
 
 async def worker(url: str, token: str, calls: int, seed: int, lat: dict[str, list[float]], errors: list[str]) -> None:
     rnd = random.Random(seed)
-    async with httpx2.AsyncClient(headers={"Authorization": f"Bearer {token}"}, timeout=30) as h, Client(streamable_http_client(url, http_client=h)) as c:
+    async with (
+        httpx2.AsyncClient(headers={"Authorization": f"Bearer {token}"}, timeout=30) as h,
+        Client(streamable_http_client(url, http_client=h)) as c,
+    ):
         ids: list[str] = []
         for i in range(calls):
             roll = rnd.random()
@@ -65,11 +68,14 @@ async def worker(url: str, token: str, calls: int, seed: int, lat: dict[str, lis
 
 def pct(xs: list[float], p: float) -> float:
     xs = sorted(xs)
-    return xs[min(len(xs) - 1, int(round(p * (len(xs) - 1))))] * 1000
+    return xs[min(len(xs) - 1, round(p * (len(xs) - 1)))] * 1000
 
 
 async def limited(url: str, token: str, n: int) -> tuple[int, int]:
-    async with httpx2.AsyncClient(headers={"Authorization": f"Bearer {token}"}, timeout=30) as h, Client(streamable_http_client(url, http_client=h)) as c:
+    async with (
+        httpx2.AsyncClient(headers={"Authorization": f"Bearer {token}"}, timeout=30) as h,
+        Client(streamable_http_client(url, http_client=h)) as c,
+    ):
         results = [await c.call_tool("search_tickets", {}) for _ in range(n)]
     refused = sum(1 for r in results if r.is_error and "Rate limited" in r.content[0].text)
     return n - refused, refused
@@ -89,7 +95,14 @@ def main() -> None:
         url = f"http://127.0.0.1:{port}/mcp"
         key = private.read_bytes()
         tokens = [
-            devkeys.mint(key, issuer=s.issuer, audience=s.audience, subject=f"user{i}", tenant=f"tenant{i % 4}", scopes=["tickets:read", "tickets:write"])
+            devkeys.mint(
+                key,
+                issuer=s.issuer,
+                audience=s.audience,
+                subject=f"user{i}",
+                tenant=f"tenant{i % 4}",
+                scopes=["tickets:read", "tickets:write"],
+            )
             for i in range(a.clients)
         ]
         lat: dict[str, list[float]] = {}

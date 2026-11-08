@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-
 from mcpkit.cli import main
 
 ROOT = Path(__file__).resolve().parents[1]
