@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint, types, contract, tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    services:
+      redis:
+        image: redis:8-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 2s --health-retries 20
+    env:
+      REDIS_URL: redis://127.0.0.1:6379/0
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: mypy
+      - name: Tool contract matches schemas/contract.json
+        run: mcpkit contract --check
+      - name: Tests (auth, scopes, tenancy, limits, HTTP end to end, stdio, Redis limiter)
+        run: pytest --cov --cov-report=term-missing --cov-fail-under=85
+
+  load:
+    name: Load test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: |
+          python bench/load.py --clients 16 --calls 50 --out performance.md
+          cat performance.md >> "$GITHUB_STEP_SUMMARY"
+
+  image:
+    name: Container image
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker build -t mcp-server-toolkit:ci .
+      - name: Smoke test with a read-only root filesystem
+        run: |
+          pip install -e .
+          mcpkit dev-keys --dir dev
+          docker run -d --name mcp --read-only --tmpfs /data:uid=10001 --tmpfs /tmp -p 8000:8000 \
+            -v "$PWD/dev/jwks.json:/keys/jwks.json:ro" -e MCPKIT_JWKS_FILE=/keys/jwks.json mcp-server-toolkit:ci
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8000/readyz && break; sleep 1; done
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8000/mcp -d '{}')" = 401
+          TOKEN=$(mcpkit dev-token --scopes "tickets:read tickets:write")
+          curl -sf -X POST http://127.0.0.1:8000/mcp -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+            -H 'accept: application/json, text/event-stream' -H 'mcp-protocol-version: 2025-06-18' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_ticket","arguments":{"title":"From CI","body":"ok"}}}' \
+            | grep -q T-000001
+          test "$(docker exec mcp id -u)" = 10001
+      - name: Push to GHCR on tags
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          tag="ghcr.io/${{ github.repository }}:${GITHUB_REF_NAME#v}"
+          docker tag mcp-server-toolkit:ci "$tag" && docker push "$tag"
+
+  manifests:
+    name: Kubernetes manifests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Render with kustomize and validate with kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz | tar xz
+          kubectl kustomize deploy/k8s | ./kubeconform -strict -summary -
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[redis]" pip-audit
+      - run: pip-audit --skip-editable

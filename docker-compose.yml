@@ -1,0 +1,24 @@
+# Local stack: two replicas sharing a rate-limit bucket in Redis, behind nothing fancier than two ports.
+# Development tokens: `mcpkit dev-keys` then `mcpkit dev-token`. Never use the development key in production.
+services:
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+  mcp-a: &mcp
+    build: .
+    environment:
+      MCPKIT_ISSUER: http://127.0.0.1:8000/dev-issuer
+      MCPKIT_AUDIENCE: http://127.0.0.1:8000/mcp
+      MCPKIT_JWKS_FILE: /keys/jwks.json
+      MCPKIT_REDIS_URL: redis://redis:6379/0
+      MCPKIT_ALLOWED_HOSTS: '["127.0.0.1:*", "localhost:*"]'
+    volumes:
+      - ./dev/jwks.json:/keys/jwks.json:ro
+      - data:/data
+    ports: ["8000:8000"]
+    depends_on: [redis]
+  mcp-b:
+    <<: *mcp
+    ports: ["8001:8000"]
+volumes:
+  data:
