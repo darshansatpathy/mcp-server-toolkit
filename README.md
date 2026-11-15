@@ -8,6 +8,9 @@
 
 A production template for [Model Context Protocol](https://modelcontextprotocol.io) servers in Python. The SDK makes a tool a decorated function; this repository adds what it takes to put one in front of real users: **OAuth resource-server auth, per-tool scopes, tenant isolation, rate limits, timeouts, size limits, an audit log, metrics, a checked tool contract, a container and Kubernetes manifests**, all tested end to end.
 
+> Reference implementation built on synthetic or public data. It distils patterns from production
+> work into code you can run and read; it is not a client system.
+
 The example domain is a support-ticket system (search, read, create, comment, close). Replace the tools; keep the shape.
 
 ## What a request goes through
